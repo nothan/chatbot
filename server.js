@@ -1,33 +1,31 @@
-// =====================================================================
-// server.js — FINAL GA REALTIME BACKEND (OpenAI client secret)
-// =====================================================================
-
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
-// ------------------------------------------------------------
-// CONFIG
-// ------------------------------------------------------------
+// Init GA OpenAI SDK
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
-// ------------------------------------------------------------
-// GENERATE CLIENT SECRET FOR BROWSER
-// ------------------------------------------------------------
-app.get("/api/secret", async (req, res) => {
-    console.log("🔥 Creating GA realtime client secret…");
+// Your realtime model
+const MODEL = "gpt-4o-realtime-preview-2024-12-17";
 
+// ====================================================================
+// Create REALTIME client secret (GA API)  ✅
+// ====================================================================
+app.get("/api/secret", async (req, res) => {
     try {
-        // GA REALTIME SECRET CREATION — FINAL FORMAT
-        const secret = await openai.realtime.clientSecrets.create({
-            type: "realtime",                         // GA REQUIRED
-            model: "gpt-4o-realtime-preview-2024-12-17",
-            expires_in: 600                           // optional
+        console.log("🔥 Creating GA realtime client secret…");
+
+        const secret = await openai.realtime.clientSessions.clientSecrets.create({
+            session: {
+                type: "realtime",
+                model: MODEL
+            }
         });
 
         console.log("✅ SECRET CREATED:", secret);
@@ -35,15 +33,19 @@ app.get("/api/secret", async (req, res) => {
 
     } catch (err) {
         console.error("❌ Failed to create client secret");
-        console.log("OPENAI RESPONSE:", err.response?.data || err);
+        console.error("OPENAI RESPONSE:", err);
 
         res.status(500).json({
             error: "Failed to create realtime client secret",
-            details: err.response?.data || err
+            details: err?.error || err
         });
     }
 });
 
-// ------------------------------------------------------------
-app.get("/", (req, res) => res.send("Lama Realtime Server Running"));
-app.listen(3000, () => console.log("🔥 Server running on port 3000"));
+// ------------------------------------------------
+app.get("/", (req, res) => {
+    res.send("Lama Realtime Backend OK");
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
