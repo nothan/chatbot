@@ -1,7 +1,4 @@
-// server.js
-// Render backend: ONLY provides the ephemeral session endpoint.
-// No static hosting. Frontend lives elsewhere.
-
+// server.js - FINAL FIXED VERSION
 import express from "express";
 import fetch from "node-fetch";
 import cors from "cors";
@@ -10,58 +7,63 @@ const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const MODEL = "gpt-4o-realtime-preview-2024-12-17";
 
 if (!OPENAI_KEY) {
-  console.error("ERROR: OPENAI_API_KEY is missing.");
+  console.error("ERROR: OPENAI_API_KEY is missing!");
   process.exit(1);
 }
 
 const app = express();
-app.use(cors());           // allow external frontend
+app.use(cors());
 app.use(express.json());
 
 // Health check
 app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
+  res.json({ ok: true });
 });
 
-/**
- * Ephemeral session endpoint
- */
+// ------------------------------------------------------------------
+// FIXED: Return ONLY session JSON, not nested object wrappers.
+// ------------------------------------------------------------------
 app.get("/api/ephemeral", async (req, res) => {
   try {
-    const body = {
-      model: MODEL
-    };
-
-    const r = await fetch("https://api.openai.com/v1/realtime/sessions", {
+    const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_KEY}`,
+        "Authorization": `Bearer ${OPENAI_KEY}`,
         "Content-Type": "application/json",
         "OpenAI-Beta": "realtime=v1"
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify({
+        model: MODEL
+      })
     });
 
-    if (!r.ok) {
-      const text = await r.text();
-      console.error("Realtime session creation failed:", text);
-      return res.status(500).json({ error: "Realtime session creation failed", details: text });
+    const session = await response.json();
+
+    // REAL FIX:
+    // Make sure client_secret.value is returned AS A STRING.
+    if (typeof session?.client_secret?.value !== "string") {
+      console.error("FATAL: client_secret.value is invalid", session);
+      return res.status(500).json({
+        error: "Invalid ephemeral session",
+        details: session
+      });
     }
 
-    const data = await r.json();
-    res.json(data);
+    res.json(session);
+
   } catch (err) {
-    console.error("Ephemeral error:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error("Ephemeral session error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// DO NOT SERVE index.html — frontend is external
+// Root
 app.get("/", (req, res) => {
-  res.send("Lama backend is running. Frontend must be hosted separately.");
+  res.send("Lama WS backend running.");
 });
 
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
-  console.log(`Lama backend running on port ${PORT}`);
+  console.log(`Lama backend running on ${PORT}`);
 });
