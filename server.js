@@ -1,28 +1,27 @@
 import express from "express";
 import http from "http";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
+
 if (!OPENAI_KEY) {
-  console.error("Missing OPENAI_API_KEY environment variable!");
+  console.error("ERROR: Missing OPENAI_API_KEY!");
   process.exit(1);
 }
 
 const app = express();
 const server = http.createServer(app);
 
-// Health check endpoint
 app.get("/", (req, res) => {
-  res.send("Lama WebSocket Proxy is running");
+  res.send("Lama WebSocket Proxy is running.");
 });
 
-// Create WebSocket server
 const wss = new WebSocketServer({ server });
 
 wss.on("connection", (client) => {
-  console.log("Client connected");
+  console.log("Client connected to proxy");
 
-  // Connect to OpenAI Realtime WebSocket
+  // CONNECT TO OPENAI REALTIME WS
   const openai = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
     {
@@ -33,7 +32,15 @@ wss.on("connection", (client) => {
     }
   );
 
-  // Forward browser → OpenAI
+  openai.on("open", () => {
+    console.log("Connected to OpenAI realtime WS");
+  });
+
+  openai.on("error", (err) => {
+    console.error("OpenAI WS ERROR:", err);
+  });
+
+  // CLIENT → OPENAI
   client.on("message", (msg) => {
     try {
       openai.send(msg);
@@ -42,21 +49,27 @@ wss.on("connection", (client) => {
     }
   });
 
-  // Forward OpenAI → browser
+  // OPENAI → CLIENT
   openai.on("message", (msg) => {
     try {
       client.send(msg);
     } catch (err) {
-      console.error("Error sending back to client:", err);
+      console.error("Error returning message to client:", err);
     }
   });
 
-  // Clean shutdown
-  client.on("close", () => openai.close());
-  openai.on("close", () => client.close());
+  // CLOSE BOTH SIDES
+  client.on("close", () => {
+    console.log("Client disconnected");
+    openai.close();
+  });
+
+  openai.on("close", () => {
+    console.log("OpenAI WS closed");
+    client.close();
+  });
 });
 
-// Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Lama WS Proxy running on port", PORT);
