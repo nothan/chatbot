@@ -1,6 +1,6 @@
 // server.js
-// Render backend: ONLY provides the ephemeral session endpoint.
-// Frontend is hosted separately. This backend must be CORS-open.
+// Render backend: ONLY provides the ephemeral client secret.
+// FRONTEND is hosted elsewhere.
 
 import express from "express";
 import fetch from "node-fetch";
@@ -18,7 +18,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-
 // ------------------------------------------------------------
 // HEALTH CHECK
 // ------------------------------------------------------------
@@ -26,17 +25,15 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-
 // ------------------------------------------------------------
-// GET EPHEMERAL CLIENT SECRET (Realtime GA)
+// CREATE REALTIME GA CLIENT SECRET
 // ------------------------------------------------------------
 app.get("/api/ephemeral", async (req, res) => {
   try {
-    console.log("🔥 Requesting GA client secret…");
+    console.log("🔥 Creating GA realtime client secret…");
 
     const body = {
-      expires_in: 3600,                          // 1 hour
-      models: [MODEL]                            // allow only our realtime model
+      models: [MODEL]       // 👈 ONLY allowed parameter
     };
 
     const r = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
@@ -49,17 +46,16 @@ app.get("/api/ephemeral", async (req, res) => {
     });
 
     const data = await r.json();
-    console.log("🔥 GA CLIENT SECRET RESPONSE:", data);
+    console.log("🔥 OPENAI RESPONSE:", data);
 
     if (!r.ok) {
-      console.error("❌ GA secret creation failed:", data);
+      console.error("❌ Failed to create client secret");
       return res.status(500).json({
         error: "Failed to create realtime client secret",
         details: data
       });
     }
 
-    // Return to frontend: { client_secret: { value, expires_at }, id, ... }
     res.json(data);
 
   } catch (err) {
@@ -68,18 +64,11 @@ app.get("/api/ephemeral", async (req, res) => {
   }
 });
 
-
-// ------------------------------------------------------------
-// ROOT
 // ------------------------------------------------------------
 app.get("/", (req, res) => {
-  res.send("Lama backend is running. Frontend must be hosted separately.");
+  res.send("Lama backend running. Frontend hosted elsewhere.");
 });
 
-
-// ------------------------------------------------------------
-// START SERVER
-// ------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🔥 Lama backend running on port ${PORT}`);
