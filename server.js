@@ -1,16 +1,14 @@
-// server.js
-// Render backend: ONLY provides the GA Realtime client_secret endpoint.
-// Frontend (lama-agent.js + UI) is hosted somewhere else.
+// server.js — FINAL GA VERSION
 
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
 
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
-const MODEL = "gpt-4o-realtime-preview-2024-12-17"; // same as in lama-agent.js
+const MODEL = "gpt-4o-realtime-preview-2024-12-17";
 
 if (!OPENAI_KEY) {
-  console.error("❌ OPENAI_API_KEY is missing in env");
+  console.error("Missing OPENAI_API_KEY");
   process.exit(1);
 }
 
@@ -18,29 +16,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Simple health check
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
-});
-
-// ---------------------------------------------------------------------
-// GA client_secret for browser Realtime WS
-// ---------------------------------------------------------------------
-app.get("/api/secret", async (_req, res) => {
+// GA client secret endpoint
+app.get("/api/secret", async (req, res) => {
   try {
-    console.log("==> Creating GA realtime client secret…");
+    console.log("🔥 Creating GA realtime client secret…");
 
-    // ⚠️ IMPORTANT:
-    // client_secrets only accepts a limited session object.
-    // NO session.modalities, NO session.audio.*, etc.
     const body = {
+      ttl: 300,
       session: {
-        type: "realtime",
+        type: "realtime",           // REQUIRED
         model: MODEL,
-        // optional but allowed:
-        instructions:
-          "You are Lama, a friendly Saudi AI assistant. Reply in Saudi Arabic when the user uses Arabic, otherwise in English.",
-      },
+        instructions: "You are Lama, a friendly Saudi AI assistant."
+      }
     };
 
     const r = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
@@ -48,34 +35,30 @@ app.get("/api/secret", async (_req, res) => {
       headers: {
         Authorization: `Bearer ${OPENAI_KEY}`,
         "Content-Type": "application/json",
+        "OpenAI-Beta": "realtime=v1"
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     });
 
     const data = await r.json();
     console.log("OPENAI RESPONSE:", data);
 
     if (!r.ok) {
-      console.error("❌ Failed to create client secret");
-      return res.status(500).json({
-        error: "Failed to create realtime client secret",
-        details: data,
-      });
+      console.log("❌ Failed to create client secret");
+      return res.status(500).json({ error: data });
     }
 
-    return res.json(data);
-  } catch (err) {
-    console.error("❌ /api/secret error:", err);
-    return res.status(500).json({ error: "Server error" });
+    res.json(data);
+
+  } catch (error) {
+    console.error("SECRET ERROR:", error);
+    res.status(500).json({ error: "internal_error" });
   }
 });
 
-// Root info
-app.get("/", (_req, res) => {
-  res.send("Lama backend is running. Frontend is hosted separately.");
+app.get("/", (req, res) => {
+  res.send("Lama backend running.");
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Lama backend running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log("Backend running on port", PORT));
