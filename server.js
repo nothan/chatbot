@@ -1,45 +1,38 @@
-// server.js — FINAL WORKING VERSION
-import express from "express";
-import cors from "cors";
-import { OpenAI } from "openai";
-
+// server.js (Node.js / Express)
+import express from 'express';
+import fetch from 'node-fetch'; // if Node 18+, can use global fetch
 const app = express();
-app.use(cors());
-app.use(express.json());
+const PORT = process.env.PORT || 3000;
 
-// --------------------------------------
-// INIT OPENAI CLIENT
-// --------------------------------------
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-// --------------------------------------
-// CREATE REALTIME CLIENT SECRET (GA API)
-// --------------------------------------
-app.get("/api/secret", async (req, res) => {
-  console.log("🔥 Creating GA realtime client secret…");
-
+app.get('/api/token', async (req, res) => {
   try {
-    const secret = await client.realtime.clientSecrets.create({
-      model: "gpt-4o-realtime-preview-2024-12-17",
-      expires_in: 600, // 10 minutes
+    const resp = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "realtime=v1"
+      },
+      body: JSON.stringify({
+        session: {
+          type: "realtime",          // Use "realtime" for chat; use "transcription" for STT:contentReference[oaicite:3]{index=3}
+          model: process.env.MODEL || "gpt-realtime"
+        }
+      })
     });
-
-    console.log("✅ Secret created:", secret);
-    res.json(secret);
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return res.status(resp.status).json({ error: errText });
+    }
+    const data = await resp.json();
+    // Return the entire JSON; client will use data.client_secret.value
+    res.json(data);
   } catch (err) {
-    console.log("❌ Failed to create realtime client secret");
-    console.log("OPENAI RESPONSE:", err?.response?.data || err);
-
-    res.status(500).json({
-      error: "Failed to create realtime client secret",
-      details: err?.response?.data || err,
-    });
+    console.error("Failed to create realtime client secret:", err);
+    res.status(500).json({ error: "Failed to create realtime client secret" });
   }
 });
 
-// --------------------------------------
-app.listen(10000, () => {
-  console.log("Backend running on port 10000");
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
