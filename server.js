@@ -1,108 +1,95 @@
 // server.js
-// Clean, stable, OpenAI Realtime v1 WebSocket proxy
-// Works on Render, Vercel, Railway, Fly.io, etc.
+// Backend for Lama: creates ephemeral Realtime sessions for the browser.
 
 import express from "express";
-import http from "http";
-import { WebSocketServer, WebSocket } from "ws";
+import fetch from "node-fetch";
+import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
+const MODEL =
+  process.env.REALTIME_MODEL || "gpt-4o-realtime-preview-2024-12-17";
 
 if (!OPENAI_KEY) {
-  console.error("ERROR: OPENAI_API_KEY is missing in environment variables.");
+  console.error("ERROR: OPENAI_API_KEY is not set.");
   process.exit(1);
 }
 
 const app = express();
-const server = http.createServer(app);
+app.use(cors());
+app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.send("Lama Realtime Proxy is running.");
+// Resolve __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serve static files (index.html, lama-agent.js, css) from /public
+app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
 });
 
-// ------------------------------------------------------------
-// WS SERVER FOR BROWSER
-// ------------------------------------------------------------
-const wss = new WebSocketServer({ server });
+/**
+ * GET /api/ephemeral
+ *
+ * The browser calls this endpoint to get an ephemeral Realtime session.
+ * We call OpenAI:
+ *   POST https://api.openai.com/v1/realtime/sessions
+ *   headers:
+ *     Authorization: Bearer <OPENAI_KEY>
+ *     Content-Type: application/json
+ *     OpenAI-Beta: realtime=v1
+ */
+app.get("/api/ephemeral", async (req, res) => {
+  try {
+    const body = {
+      model: MODEL,
+      // You can also fix voice/instructions here if you want:
+      // voice: "coral",
+      // instructions: "You are Lama, a Saudi sales & support AI assistant..."
+    };
 
-wss.on("connection", (client) => {
-  console.log("Client connected to proxy");
-
-  let openaiReady = false;
-  let messageQueue = [];
-
-  // ------------------------------------------------------------
-  // CONNECT TO OPENAI REALTIME WS
-  // ------------------------------------------------------------
-  const openai = new WebSocket(
-    "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
-    {
+    const r = await fetch("https://api.openai.com/v1/realtime/sessions", {
+      method: "POST",
       headers: {
-        "Authorization": `Bearer ${OPENAI_KEY}`,
-        "OpenAI-Beta": "realtime=v1"
+        Authorization: `Bearer ${OPENAI_KEY}`,
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "realtime=v1",
       },
-      protocol: "openai-realtime-v1"   // REQUIRED
-    }
-  );
+      body: JSON.stringify(body),
+    });
 
-  openai.on("open", () => {
-    console.log("Connected to OpenAI Realtime WS");
-    openaiReady = true;
-
-    // flush queued messages
-    for (const msg of messageQueue) {
-      try { openai.send(msg); } catch {}
-    }
-    messageQueue = [];
-  });
-
-  openai.on("error", (err) => {
-    console.error("OpenAI WS ERROR:", err);
-    try { client.close(1011, "OpenAI WS failed"); } catch {}
-  });
-
-  openai.on("close", (code, reason) => {
-    console.warn("OpenAI WS closed:", code, reason);
-    try { client.close(1000); } catch {}
-  });
-
-  // ------------------------------------------------------------
-  // BROWSER → OPENAI
-  // ------------------------------------------------------------
-  client.on("message", (msg) => {
-    if (!openaiReady) {
-      messageQueue.push(msg);
-      return;
+    if (!r.ok) {
+      const text = await r.text();
+      console.error(
+        "Error creating Realtime session:",
+        r.status,
+        r.statusText,
+        text
+      );
+      return res
+        .status(500)
+        .json({ error: "Failed to create Realtime session", details: text });
     }
 
-    try {
-      openai.send(msg);
-    } catch (err) {
-      console.error("Error forwarding to OpenAI:", err);
-    }
-  });
-
-  client.on("close", () => {
-    console.log("Browser disconnected");
-    try { openai.close(); } catch {}
-  });
-
-  // ------------------------------------------------------------
-  // OPENAI → BROWSER
-  // ------------------------------------------------------------
-  openai.on("message", (msg) => {
-    try {
-      client.send(msg);
-    } catch (err) {
-      console.error("Error sending to browser:", err);
-    }
-  });
+    const data = await r.json();
+    // We return the whole session payload; the browser uses client_secret.value
+    res.json(data);
+  } catch (err) {
+    console.error("Ephemeral endpoint error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
-// ------------------------------------------------------------
-// START SERVER
-// ------------------------------------------------------------
+// For convenience, serve index.html at root
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// Start server
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log("Lama WS Proxy running on port", PORT);
+app.listen(PORT, () => {
+  console.log(`Lama backend running on port ${PORT}`);
 });
