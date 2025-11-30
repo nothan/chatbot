@@ -1,3 +1,7 @@
+// server.js
+// Clean, stable, OpenAI Realtime v1 WebSocket proxy
+// Works on Render, Vercel, Railway, Fly.io, etc.
+
 import express from "express";
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
@@ -5,7 +9,7 @@ import { WebSocketServer, WebSocket } from "ws";
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 
 if (!OPENAI_KEY) {
-  console.error("ERROR: OPENAI_API_KEY missing");
+  console.error("ERROR: OPENAI_API_KEY is missing in environment variables.");
   process.exit(1);
 }
 
@@ -13,10 +17,12 @@ const app = express();
 const server = http.createServer(app);
 
 app.get("/", (req, res) => {
-  res.send("Lama Realtime Proxy running on Render.");
+  res.send("Lama Realtime Proxy is running.");
 });
 
-// Create WS server for browser
+// ------------------------------------------------------------
+// WS SERVER FOR BROWSER
+// ------------------------------------------------------------
 const wss = new WebSocketServer({ server });
 
 wss.on("connection", (client) => {
@@ -25,37 +31,46 @@ wss.on("connection", (client) => {
   let openaiReady = false;
   let messageQueue = [];
 
-  // Create WS to OpenAI
+  // ------------------------------------------------------------
+  // CONNECT TO OPENAI REALTIME WS
+  // ------------------------------------------------------------
   const openai = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
     {
       headers: {
         "Authorization": `Bearer ${OPENAI_KEY}`,
         "OpenAI-Beta": "realtime=v1"
-      }
+      },
+      protocol: "openai-realtime-v1"   // REQUIRED
     }
   );
 
-  // When OpenAI is ready
   openai.on("open", () => {
-    console.log("Connected to OpenAI realtime WS");
+    console.log("Connected to OpenAI Realtime WS");
     openaiReady = true;
 
-    // Flush queued messages
-    messageQueue.forEach((msg) => openai.send(msg));
+    // flush queued messages
+    for (const msg of messageQueue) {
+      try { openai.send(msg); } catch {}
+    }
     messageQueue = [];
   });
 
-  // When OpenAI errors
   openai.on("error", (err) => {
     console.error("OpenAI WS ERROR:", err);
-    client.close(1011, "OpenAI WS error");
+    try { client.close(1011, "OpenAI WS failed"); } catch {}
   });
 
-  // When browser sends message → forward to OpenAI
+  openai.on("close", (code, reason) => {
+    console.warn("OpenAI WS closed:", code, reason);
+    try { client.close(1000); } catch {}
+  });
+
+  // ------------------------------------------------------------
+  // BROWSER → OPENAI
+  // ------------------------------------------------------------
   client.on("message", (msg) => {
     if (!openaiReady) {
-      // Queue until OpenAI WS is open
       messageQueue.push(msg);
       return;
     }
@@ -63,11 +78,18 @@ wss.on("connection", (client) => {
     try {
       openai.send(msg);
     } catch (err) {
-      console.error("Error sending to OpenAI:", err);
+      console.error("Error forwarding to OpenAI:", err);
     }
   });
 
-  // When OpenAI sends message → forward to browser
+  client.on("close", () => {
+    console.log("Browser disconnected");
+    try { openai.close(); } catch {}
+  });
+
+  // ------------------------------------------------------------
+  // OPENAI → BROWSER
+  // ------------------------------------------------------------
   openai.on("message", (msg) => {
     try {
       client.send(msg);
@@ -75,22 +97,11 @@ wss.on("connection", (client) => {
       console.error("Error sending to browser:", err);
     }
   });
-
-  // Cleanup for browser disconnecting
-  client.on("close", () => {
-    console.log("Browser disconnected");
-    openai.close();
-  });
-
-  // Cleanup for OpenAI closing
-  openai.on("close", () => {
-    console.log("OpenAI WS closed");
-    client.close();
-  });
 });
 
-
-// Start server
+// ------------------------------------------------------------
+// START SERVER
+// ------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Lama WS Proxy running on port", PORT);
