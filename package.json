@@ -1,16 +1,29 @@
 {
-  "name": "lama-proxy",
+  "name": "lama-realtime-backend",
   "version": "1.0.0",
+  "description": "Backend for Lama AI Realtime assistant using OpenAI Realtime Ephemeral Sessions.",
   "type": "module",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
+  "keywords": [
+    "openai",
+    "realtime",
+    "ephemeral",
+    "websocket",
+    "ai",
+    "saudi",
+    "assistant"
+  ],
   "dependencies": {
-  "cors": "^2.8.5",
-  "express": "^4.19.0",
-  "node-fetch": "^3.3.2"
-},
-"type": "module",
-"scripts": {
-  "start": "node server.js"
+    "cors": "^2.8.5",
+    "express": "^4.19.0",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "Hadi",
+  "license": "MIT"
 }
