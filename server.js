@@ -1,4 +1,4 @@
-// server.js — FINAL FIXED RELAY (Realtime v1 compliant, text enabled)
+// server.js — FINAL FIXED RELAY (Realtime v1 compatible, text-only)
 
 import express from "express";
 import cors from "cors";
@@ -29,7 +29,6 @@ wss.on("connection", (client) => {
         "OpenAI-Beta": "realtime=v1"
       },
       perMessageDeflate: false,
-      maxPayload: 512 * 1024 * 1024,
       protocolVersion: 13
     }
   );
@@ -37,15 +36,12 @@ wss.on("connection", (client) => {
   openaiWs.on("open", () => {
     console.log("🔵 Relay connected to OpenAI");
 
-    // 🔥 FIXED: No modalities, no audio
+    // 🔥 FINAL FIX: ONLY instructions allowed
     openaiWs.send(
       JSON.stringify({
         type: "session.update",
         session: {
-          instructions: "You are Lama, a friendly assistant.",
-          voice: null,             // disable audio model → force text output
-          input_audio_format: null,
-          output_audio_format: null
+          instructions: "You are Lama, a friendly assistant."
         }
       })
     );
@@ -67,22 +63,25 @@ wss.on("connection", (client) => {
     if (client.readyState !== WebSocket.OPEN) return;
 
     if (isBinary) {
-      client.send(data); // audio
+      client.send(data); // audio (if ever enabled)
     } else {
-      client.send(data.toString("utf8")); // JSON text
+      client.send(data.toString("utf8"));
       console.log("FORWARDED TEXT:", data.toString("utf8"));
     }
   });
 
-  // Closing
+  // Cleanup
   const closePair = (reason) => {
     console.log("🔻 Closing pair:", reason);
-    try { if (client.readyState === WebSocket.OPEN) client.close(); } catch (_) {}
-    try { if (openaiWs.readyState === WebSocket.OPEN) openaiWs.close(); } catch (_) {}
+    try { client.close(); } catch (_) {}
+    try { openaiWs.close(); } catch (_) {}
   };
 
   client.on("close", () => closePair("browser closed"));
   client.on("error", () => closePair("browser error"));
   openaiWs.on("close", () => closePair("openai closed"));
-  openaiWs.on("error", () => closePair("openai error"));
+  openaiWs.on("error", (e) => {
+    console.error("OpenAI WS error:", e);
+    closePair("openai error");
+  });
 });
