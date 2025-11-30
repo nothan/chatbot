@@ -1,17 +1,23 @@
 import express from "express";
 import http from "http";
-import WebSocket from "ws";
+import { WebSocketServer } from "ws";
 
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
+if (!OPENAI_KEY) {
+  console.error("Missing OPENAI_API_KEY environment variable!");
+  process.exit(1);
+}
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
 
-// Health check
+// Health check endpoint
 app.get("/", (req, res) => {
   res.send("Lama WebSocket Proxy is running");
 });
+
+// Create WebSocket server
+const wss = new WebSocketServer({ server });
 
 wss.on("connection", (client) => {
   console.log("Client connected");
@@ -27,21 +33,31 @@ wss.on("connection", (client) => {
     }
   );
 
-  // Browser → OpenAI
+  // Forward browser → OpenAI
   client.on("message", (msg) => {
-    openai.send(msg);
+    try {
+      openai.send(msg);
+    } catch (err) {
+      console.error("Error sending to OpenAI:", err);
+    }
   });
 
-  // OpenAI → Browser
+  // Forward OpenAI → browser
   openai.on("message", (msg) => {
-    client.send(msg);
+    try {
+      client.send(msg);
+    } catch (err) {
+      console.error("Error sending back to client:", err);
+    }
   });
 
-  // Close both sockets together
+  // Clean shutdown
   client.on("close", () => openai.close());
   openai.on("close", () => client.close());
 });
 
 // Start server
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log("Proxy running on port", PORT));
+server.listen(PORT, () => {
+  console.log("Lama WS Proxy running on port", PORT);
+});
