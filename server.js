@@ -1,4 +1,4 @@
-// server.js — FINAL FIXED RELAY (text + audio correctly forwarded)
+// server.js — FINAL FIXED RELAY (Realtime v1 compliant, text enabled)
 
 import express from "express";
 import cors from "cors";
@@ -21,7 +21,6 @@ const wss = new WebSocketServer({ server, path: "/realtime" });
 wss.on("connection", (client) => {
   console.log("🟢 Browser connected to relay");
 
-  // IMPORTANT: Enable proper text/binary handling
   const openaiWs = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
     {
@@ -38,63 +37,52 @@ wss.on("connection", (client) => {
   openaiWs.on("open", () => {
     console.log("🔵 Relay connected to OpenAI");
 
+    // 🔥 FIXED: No modalities, no audio
     openaiWs.send(
       JSON.stringify({
         type: "session.update",
         session: {
-          instructions:
-            "You are Lama, a friendly assistant.",
-          modalities: ["text"],
-          audio: { enabled: false }
+          instructions: "You are Lama, a friendly assistant.",
+          voice: null,             // disable audio model → force text output
+          input_audio_format: null,
+          output_audio_format: null
         }
       })
     );
   });
 
-  // SEND BROWSER → OPENAI
+  // Browser → OpenAI
   client.on("message", (data) => {
     if (openaiWs.readyState !== WebSocket.OPEN) return;
 
     if (data instanceof Buffer) {
-      const text = data.toString("utf8");
-      openaiWs.send(text);
+      openaiWs.send(data.toString("utf8"));
     } else {
       openaiWs.send(data);
     }
   });
 
-  // SEND OPENAI → BROWSER   (THIS IS THE IMPORTANT FIX)
+  // OpenAI → Browser
   openaiWs.on("message", (data, isBinary) => {
     if (client.readyState !== WebSocket.OPEN) return;
 
     if (isBinary) {
-      // Audio
-      client.send(data);
+      client.send(data); // audio
     } else {
-      // JSON text
-      const text = data.toString();
-      client.send(text);
-      console.log("FORWARDED TEXT:", text);
+      client.send(data.toString("utf8")); // JSON text
+      console.log("FORWARDED TEXT:", data.toString("utf8"));
     }
   });
 
-  // CLEANUP
+  // Closing
   const closePair = (reason) => {
     console.log("🔻 Closing pair:", reason);
-    try {
-      if (client.readyState === WebSocket.OPEN) client.close();
-    } catch (_) {}
-    try {
-      if (openaiWs.readyState === WebSocket.OPEN) openaiWs.close();
-    } catch (_) {}
+    try { if (client.readyState === WebSocket.OPEN) client.close(); } catch (_) {}
+    try { if (openaiWs.readyState === WebSocket.OPEN) openaiWs.close(); } catch (_) {}
   };
 
   client.on("close", () => closePair("browser closed"));
   client.on("error", () => closePair("browser error"));
-
   openaiWs.on("close", () => closePair("openai closed"));
-  openaiWs.on("error", (e) => {
-    console.error("OpenAI WS error:", e);
-    closePair("openai error");
-  });
+  openaiWs.on("error", () => closePair("openai error"));
 });
