@@ -1,4 +1,5 @@
-// server.js — WebSocket relay (final version with binary→text fix)
+// server.js — FINAL FIXED RELAY (text + audio correctly forwarded)
+
 import express from "express";
 import cors from "cors";
 import { WebSocketServer } from "ws";
@@ -6,43 +7,43 @@ import WebSocket from "ws";
 
 const app = express();
 
-// Allow ONLY your frontend domain
 app.use(cors({ origin: "https://eddiy.edlytica.com" }));
 
-app.get("/", (req, res) => res.send("Lama relay server is running."));
+app.get("/", (req, res) => res.send("Lama relay server running"));
 
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () =>
-  console.log(`HTTP server listening on port ${PORT}`)
+  console.log(`HTTP server listening on ${PORT}`)
 );
 
-// MAIN WebSocket RELAY
 const wss = new WebSocketServer({ server, path: "/realtime" });
 
 wss.on("connection", (client) => {
   console.log("🟢 Browser connected to relay");
 
-  // Connect to OpenAI Realtime
+  // IMPORTANT: Enable proper text/binary handling
   const openaiWs = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
     {
       headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "OpenAI-Beta": "realtime=v1"
-      }
+      },
+      perMessageDeflate: false,
+      maxPayload: 512 * 1024 * 1024,
+      protocolVersion: 13
     }
   );
 
   openaiWs.on("open", () => {
     console.log("🔵 Relay connected to OpenAI");
 
-    // Default instructions
     openaiWs.send(
       JSON.stringify({
         type: "session.update",
         session: {
           instructions:
-            "You are Lama, a friendly sales assistant.",
+            "You are Lama, a friendly assistant.",
           modalities: ["text"],
           audio: { enabled: false }
         }
@@ -50,45 +51,46 @@ wss.on("connection", (client) => {
     );
   });
 
-  // ----------- FIX: Convert binary -> UTF8 text for OpenAI -----------
+  // SEND BROWSER → OPENAI
   client.on("message", (data) => {
     if (openaiWs.readyState !== WebSocket.OPEN) return;
 
     if (data instanceof Buffer) {
-      try {
-        const text = data.toString("utf8");
-        openaiWs.send(text);
-      } catch (e) {
-        console.error("❌ Could not decode binary frame:", e);
-      }
-    } else if (typeof data === "string") {
-      openaiWs.send(data);
+      const text = data.toString("utf8");
+      openaiWs.send(text);
     } else {
-      console.error("Unknown client→relay frame:", typeof data);
+      openaiWs.send(data);
     }
   });
 
-  // Relay OpenAI → browser
-  openaiWs.on("message", (data) => {
-    if (client.readyState === WebSocket.OPEN) {
+  // SEND OPENAI → BROWSER   (THIS IS THE IMPORTANT FIX)
+  openaiWs.on("message", (data, isBinary) => {
+    if (client.readyState !== WebSocket.OPEN) return;
+
+    if (isBinary) {
+      // Audio
       client.send(data);
+    } else {
+      // JSON text
+      const text = data.toString();
+      client.send(text);
+      console.log("FORWARDED TEXT:", text);
     }
   });
 
-  // close handlers
-  const closePair = (why) => {
-    console.log("🔻 Closing pair:", why);
+  // CLEANUP
+  const closePair = (reason) => {
+    console.log("🔻 Closing pair:", reason);
     try {
       if (client.readyState === WebSocket.OPEN) client.close();
+    } catch (_) {}
+    try {
       if (openaiWs.readyState === WebSocket.OPEN) openaiWs.close();
     } catch (_) {}
   };
 
   client.on("close", () => closePair("browser closed"));
-  client.on("error", (e) => {
-    console.error("Browser WS error:", e);
-    closePair("browser error");
-  });
+  client.on("error", () => closePair("browser error"));
 
   openaiWs.on("close", () => closePair("openai closed"));
   openaiWs.on("error", (e) => {
